@@ -49,10 +49,16 @@ rgate <URL> [OPTIONS]
 ```
 
 ### Example
-To proxy requests to `https://example.com` and listen on port `9000` for the proxy and `9001` for the dashboard:
+To proxy requests to `https://example.com` and listen on default ports `9000` for the proxy and `9001` for the dashboard:
 
 ```bash
-rgate https://example.com --port 9000 --dashboard-port 9001
+rgate https://example.com
+```
+
+To proxy requests to `https://other-example.com` and listen on port `9100` for the proxy and `9101` for the dashboard:
+
+```bash
+rgate https://other-example.com --port 9100 --dashboard-port 9101
 ```
 
 ### Options
