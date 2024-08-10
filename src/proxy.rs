@@ -105,10 +105,17 @@ pub async fn proxy_handler(
     }
 
     if ws_sender.receiver_count() > 0 {
-        let _ = ws_sender.send(log_entry);
+        let _ = ws_sender.send(log_entry.clone());
     }
 
-    println!("Logged entry");
+    // Print a detailed log entry
+    println!(
+        "{} {} {}ms {}",
+        log_entry.method,
+        log_entry.uri,
+        log_entry.response_time,
+        log_entry.response_status
+    );
 
     let mut response_builder = Response::builder().status(status);
     for (key, value) in response_headers.iter() {

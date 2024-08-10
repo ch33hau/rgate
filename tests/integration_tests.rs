@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod integration_tests {
-    use rusty_gate::{LogEntry, proxy_handler, handle_websocket};
+    use rgate::{LogEntry, proxy_handler, handle_websocket};
     use warp::http::{StatusCode, Response};
     use warp::test::{request, ws};
     use std::sync::{Arc, Mutex};
@@ -73,7 +73,7 @@ mod integration_tests {
             .map(move || {
                 let state_guard = state.lock().unwrap();
                 let logs: Vec<LogEntry> = state_guard.iter().cloned().collect();
-                warp::reply::json(&rusty_gate::Log { requests: logs })
+                warp::reply::json(&rgate::Log { requests: logs })
             });
 
         let resp = request()

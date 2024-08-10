@@ -1,7 +1,12 @@
 [package]
-name = "rusty_gate"
+name = "rgate"
 version = "0.1.0"
 edition = "2021"
+
+# Specify the path to your main binary
+[[bin]]
+name = "rgate"
+path = "src/main.rs"
 
 [dependencies]
 warp = "0.3.7"

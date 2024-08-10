@@ -931,6 +931,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rgate"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "clap",
+ "flate2",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+ "warp",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -956,22 +972,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c74cae0a4cf6ccbbf5f359f08efdf8ee7e1dc532573bf0db71968cb56b1448c"
 dependencies = [
  "base64",
-]
-
-[[package]]
-name = "rusty_gate"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "clap",
- "flate2",
- "futures-util",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "url",
- "warp",
 ]
 
 [[package]]
