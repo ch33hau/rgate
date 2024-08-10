@@ -6,17 +6,20 @@ use tokio::sync::broadcast;
 use url::Url;
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    name = "rgate",
+    version,
+    author,
+    about = "A simple HTTP proxy and logging tool"
+)]
 struct Args {
-    /// The URL to proxy to
+    #[arg(help = "The base URL to which requests will be proxied")]
     url: String,
 
-    /// The port to run the proxy server on (default: 9000)
-    #[arg(short, long, default_value_t = 9000)]
+    #[arg(short, long, default_value_t = 9000, help = "The port on which the proxy server will listen")]
     port: u16,
 
-    /// The port to run the dashboard on (default: 9001)
-    #[arg(short = 'd', long, default_value_t = 9001)]
+    #[arg(short = 'd', long = "dashboard-port", default_value_t = 9001, help = "The port on which the dashboard will listen")]
     dashboard_port: u16,
 }
 
