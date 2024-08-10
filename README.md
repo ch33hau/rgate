@@ -18,14 +18,15 @@
 ```bash
 git clone https://github.com/yourusername/rgate.git
 cd rgate
-Build the project:
+
 ```
 
+### Build the project:
 ```bash
 cargo build --release
-Install the executable:
 ```
 
+### Install the executable:
 ```bash
 cargo install --path .
 ```
