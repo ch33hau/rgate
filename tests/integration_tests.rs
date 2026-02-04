@@ -8,7 +8,7 @@ mod integration_tests {
     use std::sync::{Arc, Mutex};
     use tokio::sync::broadcast;
     use url::Url;
-    use warp::http::{StatusCode};
+    use warp::http::StatusCode;
     use warp::test::{request, ws};
     use warp::Filter;
     use warp::Reply;
@@ -55,7 +55,8 @@ mod integration_tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-                let body = resp.into_body();        let body_str = String::from_utf8(body.to_vec()).unwrap();
+        let body = resp.into_body();
+        let body_str = String::from_utf8(body.to_vec()).unwrap();
         let json_body: Value = serde_json::from_str(&body_str).unwrap();
         let expected_json = serde_json::json!({
             "name": "test"});

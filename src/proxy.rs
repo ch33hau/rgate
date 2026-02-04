@@ -107,7 +107,6 @@ pub async fn proxy_handler(
         String::from_utf8_lossy(&response_body_bytes).to_string()
     };
 
-
     let request_headers = headers
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
