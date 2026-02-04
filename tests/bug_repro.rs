@@ -2,18 +2,20 @@
 mod bug_repro {
     use bytes::Bytes;
     use flate2::{write::GzEncoder, Compression};
-    use rgate::{proxy_handler, LogEntry};
     use reqwest::Client;
+    use rgate::{proxy_handler, LogEntry};
     use std::collections::VecDeque;
     use std::io::Write;
     use std::sync::{Arc, Mutex};
     use tokio::sync::broadcast;
     use url::Url;
-    use warp::Filter;
     use warp::http::{Response, StatusCode};
+    use warp::Filter;
 
     // A mock server that sends a corrupted gzipped response
-    async fn corrupted_gzip_server(original_data_bytes: Bytes) -> Result<impl warp::Reply, warp::Rejection> {
+    async fn corrupted_gzip_server(
+        original_data_bytes: Bytes,
+    ) -> Result<impl warp::Reply, warp::Rejection> {
         let mut e = GzEncoder::new(Vec::new(), Compression::default());
         e.write_all(&original_data_bytes).unwrap();
         let mut gzipped_bytes = e.finish().unwrap();
@@ -59,9 +61,15 @@ mod bug_repro {
             .body(Bytes::new())
             .unwrap();
 
-        let resp = proxy_handler(client, state.clone(), base_url.clone(), req, ws_sender.clone())
-            .await
-            .unwrap();
+        let resp = proxy_handler(
+            client,
+            state.clone(),
+            base_url.clone(),
+            req,
+            ws_sender.clone(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
 
