@@ -70,3 +70,56 @@ async fn main() {
         eprintln!("Dashboard task failed: {:?}", e2);
     }
 }
+
+#[cfg(test)]
+mod args_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_valid_args() {
+        let args = Args::try_parse_from(&["rgate", "http://localhost:8080"]).unwrap();
+        assert_eq!(args.url, "http://localhost:8080");
+        assert_eq!(args.port, 9000); // Default value
+        assert_eq!(args.dashboard_port, 9001); // Default value
+    }
+
+    #[test]
+    fn test_custom_ports() {
+        let args = Args::try_parse_from(&[
+            "rgate",
+            "http://localhost:8080",
+            "--port",
+            "8000",
+            "--dashboard-port",
+            "8001",
+        ])
+        .unwrap();
+        assert_eq!(args.url, "http://localhost:8080");
+        assert_eq!(args.port, 8000);
+        assert_eq!(args.dashboard_port, 8001);
+    }
+
+    #[test]
+    fn test_missing_url() {
+        let err = Args::try_parse_from(&["rgate"]).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("required arguments were not provided"));
+    }
+
+    #[test]
+    fn test_invalid_port_value() {
+        let err =
+            Args::try_parse_from(&["rgate", "http://localhost:8080", "--port", "abc"]).unwrap_err();
+        assert!(err.to_string().contains("invalid digit"));
+    }
+
+    #[test]
+    fn test_invalid_dashboard_port_value() {
+        let err =
+            Args::try_parse_from(&["rgate", "http://localhost:8080", "--dashboard-port", "xyz"])
+                .unwrap_err();
+        assert!(err.to_string().contains("invalid digit"));
+    }
+}
