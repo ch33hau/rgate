@@ -101,7 +101,8 @@ pub async fn proxy_handler(
         if decoder.read_to_string(&mut decompressed_body).is_ok() {
             decompressed_body
         } else {
-            String::from_utf8_lossy(&response_body_bytes).to_string()
+            eprintln!("Gzip decompression failed for URI: {}", new_uri);
+            format!("Gzip decompression failed for URI: {}", new_uri)
         }
     } else {
         String::from_utf8_lossy(&response_body_bytes).to_string()
