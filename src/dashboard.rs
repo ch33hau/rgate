@@ -14,14 +14,18 @@ pub async fn run_dashboard(
 ) {
     let logs_state = state.clone();
     let logs = warp::path("logs").map(move || {
-        let state_guard = logs_state.lock().unwrap();
+        let state_guard = logs_state
+            .lock()
+            .expect("Mutex poisoned in dashboard logs endpoint");
         let logs: Vec<LogEntry> = state_guard.iter().cloned().collect();
         warp::reply::json(&Log { requests: logs })
     });
 
     let clear_state = state.clone();
     let clear_logs = warp::path("clear-logs").map(move || {
-        let mut state_guard = clear_state.lock().unwrap();
+        let mut state_guard = clear_state
+            .lock()
+            .expect("Mutex poisoned in dashboard clear logs endpoint");
         state_guard.clear(); // Clear the server-side log
         warp::reply::json(&"Log cleared")
     });
@@ -55,7 +59,10 @@ pub async fn handle_websocket(ws: warp::ws::WebSocket, ws_sender: broadcast::Sen
     tokio::spawn(async move { while let Some(Ok(_)) = ws_rx.next().await {} });
 
     while let Ok(log_entry) = rx.recv().await {
-        let msg = serde_json::to_string(&log_entry).unwrap();
+        let msg = serde_json::to_string(&log_entry).unwrap_or_else(|e| {
+            eprintln!("Error serializing log entry: {}", e);
+            "{}".to_string()
+        });
         if let Err(e) = ws_tx.send(warp::ws::Message::text(msg)).await {
             eprintln!("WebSocket send error: {}", e);
             break;

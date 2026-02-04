@@ -1,3 +1,5 @@
+use crate::AppError;
+use crate::AppRejection;
 use bytes::Bytes;
 use flate2::read::GzDecoder;
 use reqwest::Client;
@@ -8,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::broadcast;
 use url::Url;
-use warp::http::{HeaderMap, Response, StatusCode};
+use warp::http::{HeaderMap, Response};
 use warp::path::FullPath;
 use warp::Filter;
 
@@ -37,7 +39,7 @@ pub async fn proxy_handler(
     base_url: Url,
     req: warp::http::Request<Bytes>,
     ws_sender: broadcast::Sender<LogEntry>,
-) -> Result<Response<Bytes>, warp::Rejection> {
+) -> Result<Response<Bytes>, AppRejection> {
     let start_time = Instant::now();
 
     let mut new_uri = base_url.clone();
@@ -60,22 +62,14 @@ pub async fn proxy_handler(
     let new_req = match new_req_builder.body(body_bytes.to_vec()).build() {
         Ok(req) => req,
         Err(e) => {
-            eprintln!("Error building request: {}", e);
-            return Ok(Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Bytes::from("Error building request"))
-                .unwrap());
+            return Err(AppRejection(AppError::ReqwestClientError(e)));
         }
     };
 
     let response = match client.execute(new_req).await {
         Ok(res) => res,
         Err(e) => {
-            eprintln!("Error executing request: {}", e);
-            return Ok(Response::builder()
-                .status(StatusCode::BAD_GATEWAY)
-                .body(Bytes::from("Bad Gateway"))
-                .unwrap());
+            return Err(AppRejection(AppError::ReqwestClientError(e)));
         }
     };
     let status = response.status();
@@ -84,10 +78,7 @@ pub async fn proxy_handler(
         Ok(bytes) => bytes,
         Err(e) => {
             eprintln!("Error reading response body: {}", e);
-            return Ok(Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Bytes::from("Error reading response body"))
-                .unwrap());
+            return Err(AppRejection(AppError::ReqwestClientError(e)));
         }
     };
 
@@ -131,7 +122,9 @@ pub async fn proxy_handler(
     };
 
     {
-        let mut state_guard = state.lock().unwrap();
+        let mut state_guard = state
+            .lock()
+            .map_err(|e| AppRejection(AppError::MutexPoisoned(e.to_string())))?;
         if state_guard.len() >= 100 {
             state_guard.pop_front();
         }
@@ -139,6 +132,8 @@ pub async fn proxy_handler(
     }
 
     if ws_sender.receiver_count() > 0 {
+        // Send can fail if there are no receivers, but we don't care about that
+        // so we just ignore the error.
         let _ = ws_sender.send(log_entry.clone());
     }
 
@@ -199,14 +194,14 @@ pub async fn run_proxy(
                     Ok(req) => req,
                     Err(e) => {
                         eprintln!("Error building request: {}", e);
-                        let res: Result<Response<Bytes>, warp::Rejection> = Ok(Response::builder()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .body(Bytes::from("Error building request"))
-                            .unwrap());
-                        return res;
+                        return Err(warp::reject::custom(AppRejection(
+                            AppError::HttpRequestBuildError(e),
+                        )));
                     }
                 };
-                proxy_handler(client, state, base_url, req, ws_sender).await
+                proxy_handler(client, state, base_url, req, ws_sender)
+                    .await
+                    .map_err(warp::reject::custom)
             },
         );
 
