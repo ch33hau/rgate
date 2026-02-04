@@ -131,4 +131,66 @@ mod integration_tests {
 
         ws_client.send(warp::ws::Message::close()).await;
     }
+
+    #[tokio::test]
+    async fn test_proxy_header_manipulation() {
+        let state = Arc::new(Mutex::new(VecDeque::<LogEntry>::new()));
+        let (ws_sender, _) = broadcast::channel(100);
+        let client = Client::new();
+        let base_url = Url::parse("https://httpbin.org").unwrap();
+
+        let req = warp::http::Request::builder()
+            .method("GET")
+            .uri("/get")
+            .header("Host", "some-host.com")
+            .header("Content-Length", "123")
+            .header("X-Custom-Header", "custom-value")
+            .body(Bytes::new())
+            .unwrap();
+
+        let resp = proxy_handler(client, state.clone(), base_url, req, ws_sender.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let log = state.lock().unwrap();
+        let log_entry = log.front().unwrap();
+
+        let response_json: Value = serde_json::from_str(&log_entry.response_body).unwrap();
+        let received_headers = &response_json["headers"];
+
+        // Assert that Content-Length is NOT present in headers received by httpbin.org
+        assert!(!received_headers.get("Content-Length").is_some());
+
+        // Assert that X-Custom-Header IS present
+        assert_eq!(received_headers["X-Custom-Header"], "custom-value");
+    }
+
+    #[tokio::test]
+    async fn test_proxy_query_forwarding() {
+        let state = Arc::new(Mutex::new(VecDeque::<LogEntry>::new()));
+        let (ws_sender, _) = broadcast::channel(100);
+        let client = Client::new();
+        let base_url = Url::parse("https://httpbin.org").unwrap();
+
+        let req = warp::http::Request::builder()
+            .method("GET")
+            .uri("/get?param1=value1&param2=value2")
+            .body(Bytes::new())
+            .unwrap();
+
+        let resp = proxy_handler(client, state.clone(), base_url, req, ws_sender.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let log = state.lock().unwrap();
+        let log_entry = log.front().unwrap();
+
+        assert!(log_entry.uri.contains("param1=value1"));
+        assert!(log_entry.uri.contains("param2=value2"));
+        assert!(log_entry.uri.contains("/get"));
+    }
 }
