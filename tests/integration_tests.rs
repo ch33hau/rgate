@@ -1,18 +1,17 @@
 #[cfg(test)]
 mod integration_tests {
-    use rgate::{LogEntry, proxy_handler, handle_websocket};
-    use warp::http::{StatusCode, Response};
-    use warp::test::{request, ws};
-    use std::sync::{Arc, Mutex};
-    use std::collections::VecDeque;
-    use tokio::sync::broadcast;
-    use warp::Filter;
-    use reqwest::Client;
-    use url::Url;
     use bytes::Bytes;
-    use warp::Reply;
+    use reqwest::Client;
+    use rgate::{handle_websocket, proxy_handler, LogEntry};
     use serde_json::Value;
-
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+    use tokio::sync::broadcast;
+    use url::Url;
+    use warp::http::{StatusCode};
+    use warp::test::{request, ws};
+    use warp::Filter;
+    use warp::Reply;
 
     #[tokio::test]
     async fn test_proxy_handler_get_request() {
@@ -27,16 +26,15 @@ mod integration_tests {
             .body(Bytes::new())
             .unwrap();
 
-        let resp = proxy_handler(client, state.clone(), base_url, req, ws_sender.clone()).await.unwrap();
-        let resp = Response::from(resp.into_response());
+        let resp = proxy_handler(client, state.clone(), base_url, req, ws_sender.clone())
+            .await
+            .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        let resp = Response::from(resp.into_response()); // Convert to Response
-        let body = warp::hyper::body::to_bytes(resp.into_body()).await.unwrap(); // Extract the body as Bytes
+        let body = resp.into_body();
         let body_str = String::from_utf8_lossy(&body); // Convert to a String
 
         assert!(body_str.contains("\"url\": \"https://httpbin.org/get\""));
-
     }
 
     #[tokio::test]
@@ -52,29 +50,27 @@ mod integration_tests {
             .body(Bytes::from(r#"{"name":"test"}"#))
             .unwrap();
 
-        let resp = proxy_handler(client, state.clone(), base_url, req, ws_sender.clone()).await.unwrap();
-        let resp = Response::from(resp.into_response());
+        let resp = proxy_handler(client, state.clone(), base_url, req, ws_sender.clone())
+            .await
+            .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = warp::hyper::body::to_bytes(resp.into_body()).await.unwrap();
-        let body_str = String::from_utf8(body.to_vec()).unwrap();
+                let body = resp.into_body();        let body_str = String::from_utf8(body.to_vec()).unwrap();
         let json_body: Value = serde_json::from_str(&body_str).unwrap();
         let expected_json = serde_json::json!({
             "name": "test"});
         assert_eq!(json_body["json"], expected_json);
-
     }
 
     #[tokio::test]
     async fn test_dashboard_logs() {
         let state = Arc::new(Mutex::new(VecDeque::<LogEntry>::new()));
 
-        let logs_route = warp::path("logs")
-            .map(move || {
-                let state_guard = state.lock().unwrap();
-                let logs: Vec<LogEntry> = state_guard.iter().cloned().collect();
-                warp::reply::json(&rgate::Log { requests: logs })
-            });
+        let logs_route = warp::path("logs").map(move || {
+            let state_guard = state.lock().unwrap();
+            let logs: Vec<LogEntry> = state_guard.iter().cloned().collect();
+            warp::reply::json(&rgate::Log { requests: logs })
+        });
 
         let resp = request()
             .method("GET")
@@ -87,7 +83,6 @@ mod integration_tests {
         let body = warp::hyper::body::to_bytes(resp.into_body()).await.unwrap(); // Convert body to bytes
         let body_str = String::from_utf8_lossy(&body);
         assert!(body_str.contains("\"requests\":[]"));
-
     }
 
     #[tokio::test]
@@ -97,7 +92,6 @@ mod integration_tests {
         // Clone ws_sender for usage in the closure and outside it
         let ws_sender_clone_for_closure = ws_sender.clone();
         let ws_sender_clone_for_use_later = ws_sender.clone();
-
 
         let ws_route = warp::path("ws")
             .and(warp::ws())
@@ -124,7 +118,9 @@ mod integration_tests {
         };
 
         // Now, you can use the second clone of ws_sender outside the closure
-        ws_sender_clone_for_use_later.send(log_entry.clone()).unwrap();
+        ws_sender_clone_for_use_later
+            .send(log_entry.clone())
+            .unwrap();
 
         let msg = ws_client.recv().await.expect("Failed to receive message");
         let received_log: LogEntry = serde_json::from_str(msg.to_str().unwrap()).unwrap();

@@ -1,7 +1,7 @@
-use rgate::{run_proxy, run_dashboard};
 use clap::Parser;
-use std::sync::{Arc, Mutex};
+use rgate::{run_dashboard, run_proxy};
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use url::Url;
 
@@ -16,10 +16,20 @@ struct Args {
     #[arg(help = "The base URL to which requests will be proxied")]
     url: String,
 
-    #[arg(short, long, default_value_t = 9000, help = "The port on which the proxy server will listen")]
+    #[arg(
+        short,
+        long,
+        default_value_t = 9000,
+        help = "The port on which the proxy server will listen"
+    )]
     port: u16,
 
-    #[arg(short = 'd', long = "dashboard-port", default_value_t = 9001, help = "The port on which the dashboard will listen")]
+    #[arg(
+        short = 'd',
+        long = "dashboard-port",
+        default_value_t = 9001,
+        help = "The port on which the dashboard will listen"
+    )]
     dashboard_port: u16,
 }
 
@@ -35,10 +45,7 @@ async fn main() {
     let ws_sender_clone = ws_sender.clone();
 
     // Display the startup message
-    println!(
-        "Proxying {} on http://localhost:{}",
-        args.url, args.port
-    );
+    println!("Proxying {} on http://localhost:{}", args.url, args.port);
 
     let proxy_task = tokio::spawn(async move {
         run_proxy(proxy_state, base_url, ws_sender, args.port).await;
@@ -47,7 +54,14 @@ async fn main() {
     let dashboard_state = state.clone();
 
     let dashboard_task = tokio::spawn(async move {
-        run_dashboard(dashboard_state, ws_sender_clone, args.url, args.port, args.dashboard_port).await;
+        run_dashboard(
+            dashboard_state,
+            ws_sender_clone,
+            args.url,
+            args.port,
+            args.dashboard_port,
+        )
+        .await;
     });
 
     // Handle the Result from the joined tasks
