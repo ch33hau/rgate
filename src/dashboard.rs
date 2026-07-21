@@ -1,18 +1,20 @@
 use crate::Log;
-use crate::{LogEntry, SharedState};
+use crate::LogEntry;
 use futures_util::SinkExt;
 use futures_util::StreamExt;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use warp::Filter;
 
 pub async fn run_dashboard(
-    state: SharedState,
+    dashboard_log_state: Arc<Mutex<VecDeque<LogEntry>>>,
     ws_sender: broadcast::Sender<LogEntry>,
     url: String,
     app_port: u16,       // Application port
     dashboard_port: u16, // Dashboard port
 ) {
-    let logs_state = state.clone();
+    let logs_state = dashboard_log_state.clone();
     let logs = warp::path("logs").map(move || {
         let state_guard = logs_state
             .lock()
@@ -21,7 +23,7 @@ pub async fn run_dashboard(
         warp::reply::json(&Log { requests: logs })
     });
 
-    let clear_state = state.clone();
+    let clear_state = dashboard_log_state.clone();
     let clear_logs = warp::path("clear-logs").map(move || {
         let mut state_guard = clear_state
             .lock()

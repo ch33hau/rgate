@@ -4,10 +4,8 @@ mod bug_repro {
     use flate2::{write::GzEncoder, Compression};
     use reqwest::Client;
     use rgate::{proxy_handler, LogEntry};
-    use std::collections::VecDeque;
     use std::io::Write;
-    use std::sync::{Arc, Mutex};
-    use tokio::sync::broadcast;
+    use tokio::sync::{broadcast, mpsc};
     use url::Url;
     use warp::http::{Response, StatusCode};
     use warp::Filter;
@@ -36,7 +34,7 @@ mod bug_repro {
 
     #[tokio::test]
     async fn test_corrupted_gzip_response() {
-        let state = Arc::new(Mutex::new(VecDeque::<LogEntry>::new()));
+        let (log_sender, mut log_receiver) = mpsc::channel::<LogEntry>(1);
         let (ws_sender, _) = broadcast::channel(100);
         let client = Client::new();
 
@@ -61,20 +59,14 @@ mod bug_repro {
             .body(Bytes::new())
             .unwrap();
 
-        let resp = proxy_handler(
-            client,
-            state.clone(),
-            base_url.clone(),
-            req,
-            ws_sender.clone(),
-        )
-        .await
-        .unwrap();
+        let resp = proxy_handler(client, log_sender, base_url.clone(), req, ws_sender.clone())
+            .await
+            .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let log = state.lock().unwrap();
-        let log_entry = log.front().unwrap();
+        // Receive the log entry from the channel
+        let log_entry: LogEntry = log_receiver.recv().await.unwrap();
 
         // Expect the response body in the log to be a lossy string representation of the *corrupted gzipped bytes*,
         // not the original uncompressed data, because the proxy_handler currently tries to lossily convert gzipped data

@@ -1,8 +1,8 @@
 use clap::Parser;
-use rgate::{run_dashboard, run_proxy};
+use rgate::{run_dashboard, run_proxy, LogEntry};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use url::Url;
 
 #[derive(Parser, Debug)]
@@ -39,24 +39,41 @@ async fn main() {
 
     let base_url = Url::parse(&args.url).expect("Invalid URL");
 
-    let state = Arc::new(Mutex::new(VecDeque::new()));
-    let proxy_state = state.clone();
+    let (log_sender, mut log_receiver) = mpsc::channel::<LogEntry>(100);
     let (ws_sender, _) = broadcast::channel(100);
-    let ws_sender_clone = ws_sender.clone();
+    let ws_sender_clone_for_proxy = ws_sender.clone();
+    let ws_sender_clone_for_logger = ws_sender.clone();
 
     // Display the startup message
     println!("Proxying {} on http://localhost:{}", args.url, args.port);
 
     let proxy_task = tokio::spawn(async move {
-        run_proxy(proxy_state, base_url, ws_sender, args.port).await;
+        run_proxy(log_sender, base_url, ws_sender_clone_for_proxy, args.port).await;
     });
 
-    let dashboard_state = state.clone();
+    let dashboard_log_state = Arc::new(Mutex::new(VecDeque::new()));
+    let dashboard_log_state_clone_for_dashboard = dashboard_log_state.clone();
+    let dashboard_log_state_clone_for_logger = dashboard_log_state.clone();
+
+    // Central logging task: receives logs from proxy, stores them, and forwards to dashboard WebSocket
+    let logger_task = tokio::spawn(async move {
+        while let Some(log_entry) = log_receiver.recv().await {
+            {
+                let mut state_guard = dashboard_log_state_clone_for_logger.lock().unwrap();
+                if state_guard.len() >= 100 {
+                    state_guard.pop_front();
+                }
+                state_guard.push_back(log_entry.clone());
+            }
+            // Forward to dashboard websocket
+            let _ = ws_sender_clone_for_logger.send(log_entry);
+        }
+    });
 
     let dashboard_task = tokio::spawn(async move {
         run_dashboard(
-            dashboard_state,
-            ws_sender_clone,
+            dashboard_log_state_clone_for_dashboard,
+            ws_sender,
             args.url,
             args.port,
             args.dashboard_port,
@@ -65,9 +82,10 @@ async fn main() {
     });
 
     // Handle the Result from the joined tasks
-    if let (Err(e1), Err(e2)) = tokio::join!(proxy_task, dashboard_task) {
+    if let (Err(e1), Err(e2), Err(e3)) = tokio::join!(proxy_task, dashboard_task, logger_task) {
         eprintln!("Proxy task failed: {:?}", e1);
         eprintln!("Dashboard task failed: {:?}", e2);
+        eprintln!("Logger task failed: {:?}", e3);
     }
 }
 

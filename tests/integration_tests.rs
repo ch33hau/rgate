@@ -6,16 +6,14 @@ mod integration_tests {
     use serde_json::Value;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
-    use tokio::sync::broadcast;
+    use tokio::sync::{broadcast, mpsc};
     use url::Url;
     use warp::http::StatusCode;
     use warp::test::{request, ws};
     use warp::Filter;
-    use warp::Reply;
-
     #[tokio::test]
     async fn test_proxy_handler_get_request() {
-        let state = Arc::new(Mutex::new(VecDeque::<LogEntry>::new()));
+        let (log_sender, mut log_receiver) = mpsc::channel::<LogEntry>(1);
         let (ws_sender, _) = broadcast::channel(100);
         let client = Client::new();
         let base_url = Url::parse("https://httpbin.org").unwrap();
@@ -26,20 +24,25 @@ mod integration_tests {
             .body(Bytes::new())
             .unwrap();
 
-        let resp = proxy_handler(client, state.clone(), base_url, req, ws_sender.clone())
+        let resp = proxy_handler(client, log_sender, base_url, req, ws_sender.clone())
             .await
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
         let body = resp.into_body();
-        let body_str = String::from_utf8_lossy(&body); // Convert to a String
+        let _body_str = String::from_utf8_lossy(&body); // Convert to a String
 
-        assert!(body_str.contains("\"url\": \"https://httpbin.org/get\""));
+        // Receive the log entry from the channel
+        let log_entry: LogEntry = log_receiver.recv().await.unwrap();
+
+        assert!(log_entry
+            .response_body
+            .contains("\"url\": \"https://httpbin.org/get\""));
     }
 
     #[tokio::test]
     async fn test_proxy_handler_post_request() {
-        let state = Arc::new(Mutex::new(VecDeque::<LogEntry>::new()));
+        let (log_sender, mut log_receiver) = mpsc::channel::<LogEntry>(1);
         let (ws_sender, _) = broadcast::channel(100);
         let client = Client::new();
         let base_url = Url::parse("https://httpbin.org").unwrap();
@@ -50,7 +53,7 @@ mod integration_tests {
             .body(Bytes::from(r#"{"name":"test"}"#))
             .unwrap();
 
-        let resp = proxy_handler(client, state.clone(), base_url, req, ws_sender.clone())
+        let resp = proxy_handler(client, log_sender, base_url, req, ws_sender.clone())
             .await
             .unwrap();
 
@@ -61,14 +64,39 @@ mod integration_tests {
         let expected_json = serde_json::json!({
             "name": "test"});
         assert_eq!(json_body["json"], expected_json);
+
+        // Receive the log entry from the channel
+        let log_entry: LogEntry = log_receiver.recv().await.unwrap();
+        let response_json: Value = serde_json::from_str(&log_entry.response_body).unwrap();
+        let expected_json = serde_json::json!({
+            "name": "test"});
+        assert_eq!(response_json["json"], expected_json);
     }
 
     #[tokio::test]
     async fn test_dashboard_logs() {
-        let state = Arc::new(Mutex::new(VecDeque::<LogEntry>::new()));
+        let dashboard_log_state = Arc::new(Mutex::new(VecDeque::<LogEntry>::new()));
+        let (ws_sender, _) = broadcast::channel::<LogEntry>(100);
 
+        // Manually push a log entry to the state
+        let test_log_entry = LogEntry {
+            method: "GET".to_string(),
+            uri: "/test".to_string(),
+            headers: vec![],
+            body: "".to_string(),
+            response_status: 200,
+            response_headers: vec![],
+            response_body: "Test Body".to_string(),
+            response_time: 10,
+        };
+        dashboard_log_state
+            .lock()
+            .unwrap()
+            .push_back(test_log_entry.clone());
+
+        // Create the logs route filter, capturing the dashboard_log_state
         let logs_route = warp::path("logs").map(move || {
-            let state_guard = state.lock().unwrap();
+            let state_guard = dashboard_log_state.lock().unwrap();
             let logs: Vec<LogEntry> = state_guard.iter().cloned().collect();
             warp::reply::json(&rgate::Log { requests: logs })
         });
@@ -80,24 +108,23 @@ mod integration_tests {
             .await;
 
         assert_eq!(resp.status(), StatusCode::OK);
-        let resp = resp.into_response(); // Convert to warp::http::Response
-        let body = warp::hyper::body::to_bytes(resp.into_body()).await.unwrap(); // Convert body to bytes
+        let body = resp.into_body();
         let body_str = String::from_utf8_lossy(&body);
-        assert!(body_str.contains("\"requests\":[]"));
+
+        assert!(body_str.contains("\"method\":\"GET\""));
+        assert!(body_str.contains("\"uri\":\"/test\""));
+        assert!(body_str.contains("\"response_body\":\"Test Body\""));
     }
 
     #[tokio::test]
     async fn test_websocket_connection() {
-        let (ws_sender, _) = broadcast::channel::<LogEntry>(100);
+        let (ws_sender_to_client, _) = broadcast::channel::<LogEntry>(100);
 
-        // Clone ws_sender for usage in the closure and outside it
-        let ws_sender_clone_for_closure = ws_sender.clone();
-        let ws_sender_clone_for_use_later = ws_sender.clone();
-
+        let ws_sender_to_client_clone = ws_sender_to_client.clone();
         let ws_route = warp::path("ws")
             .and(warp::ws())
             .map(move |ws: warp::ws::Ws| {
-                let ws_sender = ws_sender_clone_for_closure.clone(); // Clone the sender inside the closure
+                let ws_sender = ws_sender_to_client_clone.clone(); // Clone the sender inside the closure
                 ws.on_upgrade(move |websocket| handle_websocket(websocket, ws_sender))
             });
 
@@ -118,10 +145,8 @@ mod integration_tests {
             response_time: 100,
         };
 
-        // Now, you can use the second clone of ws_sender outside the closure
-        ws_sender_clone_for_use_later
-            .send(log_entry.clone())
-            .unwrap();
+        // Send a log entry, mimicking the central logger task
+        ws_sender_to_client.send(log_entry.clone()).unwrap();
 
         let msg = ws_client.recv().await.expect("Failed to receive message");
         let received_log: LogEntry = serde_json::from_str(msg.to_str().unwrap()).unwrap();
@@ -134,7 +159,7 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_proxy_header_manipulation() {
-        let state = Arc::new(Mutex::new(VecDeque::<LogEntry>::new()));
+        let (log_sender, mut log_receiver) = mpsc::channel::<LogEntry>(1);
         let (ws_sender, _) = broadcast::channel(100);
         let client = Client::new();
         let base_url = Url::parse("https://httpbin.org").unwrap();
@@ -148,14 +173,14 @@ mod integration_tests {
             .body(Bytes::new())
             .unwrap();
 
-        let resp = proxy_handler(client, state.clone(), base_url, req, ws_sender.clone())
+        let resp = proxy_handler(client, log_sender, base_url, req, ws_sender.clone())
             .await
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let log = state.lock().unwrap();
-        let log_entry = log.front().unwrap();
+        // Receive the log entry from the channel
+        let log_entry: LogEntry = log_receiver.recv().await.unwrap();
 
         let response_json: Value = serde_json::from_str(&log_entry.response_body).unwrap();
         let received_headers = &response_json["headers"];
@@ -169,7 +194,7 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_proxy_query_forwarding() {
-        let state = Arc::new(Mutex::new(VecDeque::<LogEntry>::new()));
+        let (log_sender, mut log_receiver) = mpsc::channel::<LogEntry>(1);
         let (ws_sender, _) = broadcast::channel(100);
         let client = Client::new();
         let base_url = Url::parse("https://httpbin.org").unwrap();
@@ -180,14 +205,14 @@ mod integration_tests {
             .body(Bytes::new())
             .unwrap();
 
-        let resp = proxy_handler(client, state.clone(), base_url, req, ws_sender.clone())
+        let resp = proxy_handler(client, log_sender, base_url, req, ws_sender.clone())
             .await
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let log = state.lock().unwrap();
-        let log_entry = log.front().unwrap();
+        // Receive the log entry from the channel
+        let log_entry: LogEntry = log_receiver.recv().await.unwrap();
 
         assert!(log_entry.uri.contains("param1=value1"));
         assert!(log_entry.uri.contains("param2=value2"));

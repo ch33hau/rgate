@@ -1,20 +1,17 @@
 use crate::AppError;
 use crate::AppRejection;
+use crate::LogSender;
 use bytes::Bytes;
 use flate2::read::GzDecoder;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
 use std::io::Read;
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::broadcast;
 use url::Url;
 use warp::http::{HeaderMap, Response};
 use warp::path::FullPath;
 use warp::Filter;
-
-pub type SharedState = Arc<Mutex<VecDeque<LogEntry>>>;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Log {
@@ -35,10 +32,10 @@ pub struct LogEntry {
 
 pub async fn proxy_handler(
     client: Client,
-    state: SharedState,
+    log_sender: LogSender,
     base_url: Url,
     req: warp::http::Request<Bytes>,
-    ws_sender: broadcast::Sender<LogEntry>,
+    _ws_sender: broadcast::Sender<LogEntry>,
 ) -> Result<Response<Bytes>, AppRejection> {
     let start_time = Instant::now();
 
@@ -121,21 +118,8 @@ pub async fn proxy_handler(
         response_time,
     };
 
-    {
-        let mut state_guard = state
-            .lock()
-            .map_err(|e| AppRejection(AppError::MutexPoisoned(e.to_string())))?;
-        if state_guard.len() >= 100 {
-            state_guard.pop_front();
-        }
-        state_guard.push_back(log_entry.clone());
-    }
-
-    if ws_sender.receiver_count() > 0 {
-        // Send can fail if there are no receivers, but we don't care about that
-        // so we just ignore the error.
-        let _ = ws_sender.send(log_entry.clone());
-    }
+    // Send log entry to the MPSC channel
+    let _ = log_sender.send(log_entry.clone()).await;
 
     // Print a detailed log entry
     println!(
@@ -152,22 +136,22 @@ pub async fn proxy_handler(
 }
 
 pub async fn run_proxy(
-    state: SharedState,
+    log_sender: LogSender,
     base_url: Url,
     ws_sender: broadcast::Sender<LogEntry>,
     port: u16,
 ) {
     let client = Client::new();
-    let state_filter = warp::any().map(move || state.clone());
     let client_filter = warp::any().map(move || client.clone());
     let base_url_filter = warp::any().map(move || base_url.clone());
+    let log_sender_filter = warp::any().map(move || log_sender.clone());
     let ws_sender_filter = warp::any().map(move || ws_sender.clone());
 
     let proxy_route = warp::path::full()
         .and(warp::method())
         .and(warp::header::headers_cloned())
         .and(warp::body::bytes())
-        .and(state_filter)
+        .and(log_sender_filter)
         .and(client_filter)
         .and(base_url_filter)
         .and(ws_sender_filter)
@@ -176,7 +160,7 @@ pub async fn run_proxy(
              method,
              headers: HeaderMap,
              body,
-             state,
+             log_sender,
              client,
              base_url,
              ws_sender| async move {
@@ -199,7 +183,7 @@ pub async fn run_proxy(
                         )));
                     }
                 };
-                proxy_handler(client, state, base_url, req, ws_sender)
+                proxy_handler(client, log_sender, base_url, req, ws_sender)
                     .await
                     .map_err(warp::reject::custom)
             },
