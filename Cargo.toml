@@ -16,7 +16,7 @@ serde_json = "1.0"
 clap = { version = "4.0", features = ["derive"] }
 url = "2.1"
 bytes = "1.0"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls-native-roots"] }
 flate2 = "1.0"
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
